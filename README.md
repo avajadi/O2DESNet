@@ -17,7 +17,45 @@ It is developed and used by C#, which facilitates flexible integration with the 
 - Option 1: Install [.NET Framework 4.7.2](https://dotnet.microsoft.com/download).
 - Option 2: From Visual Studio Installer, go to components and checked option to install .NET Framework 4.7.2.
 
+## TCMF output (Transport Collaboration Messaging Format)
+
+The `O2DESNet.Tcmf` namespace turns simulation events into TCMF 0.0.7 messages, the JSON format used for
+collaborative decision making between transport actors (ports, railways, terminals, hauliers). Each message
+is stamped with the simulation clock, so a model can feed the same timelines a live system would.
+
+- `TcmfMessage` and the six payload types (`LocationState`, `ServiceState`, `AdministrativeState`, `CarrierState`, `AttributeState`, `MessageOperation`), with `ToJson()`, `FromJson()` and schema `Validate()`.
+- `TcmfUrn` builds the `tcmf:<category>:...` identifiers; `GroupingType` restricts groupings to the types the schema allows.
+- `TcmfReporter` is attached to any sandbox and publishes `Arrived`, `Departed`, `ServiceCommenced`, `BoundTo`, `SetAttribute`, `Invalidate`, ... at the current clock time. `AnchorClock` maps the simulation clock onto a calendar date and `SeededMessageIds` gives reproducible message ids.
+- Sinks: `TcmfCollector` (in memory), `TcmfJsonLinesSink` (one JSON message per line), `TcmfDelegateSink` (e.g. a Kafka producer), `TcmfCompositeSink`.
+- `ReportTcmf` extension methods hook a standard `Server` (ServiceState commenced/completed) or `Queue` (LocationState arrived_to) up to a reporter; `TcmfLoad` is a `Load` that carries its reference object and groupings.
+
+```csharp
+using O2DESNet.Standard;
+using O2DESNet.Tcmf;
+
+var sink = new TcmfJsonLinesSink("terminal.jsonl");
+var reporter = new TcmfReporter(sim, sink, TcmfUrn.User("RISE", "o2des_sim"),
+    TcmfReporter.AnchorClock(new DateTime(2026, 1, 1, 6, 0, 0, DateTimeKind.Utc)));
+
+crane.ReportTcmf(reporter, TcmfUrn.Service("loading", "container", "crane"), TcmfUrn.Location("terminal", "SEGOT"));
+crane.OnReadyToDepart += truck => reporter.Departed(
+    TcmfStandardExtensions.ReferenceObjectOf(truck), TcmfUrn.Location("terminal", "SEGOT"),
+    TcmfStandardExtensions.GroupingOf(truck));
+
+gateQueue.RqstEnqueue(new TcmfLoad(
+    TcmfUrn.ReferenceObject("truck", "registration_plate", "ABC123"),
+    TcmfUrn.Grouping(GroupingType.Truck, "registration_plate", "ABC123")));
+```
+
+See `Demos/TcmfContainerTerminal.cs` for a complete model and `O2DESNet.UnitTests/Tcmf_Tests.cs` for the expected output.
+
 # Change Log
+
+## Version 3.7
+```diff
++ Include O2DESNet.Tcmf: generate Transport Collaboration Messaging Format (TCMF 0.0.7) messages from simulation events, with sinks for JSON lines, in-memory collection and delegates.
++ Add System.Text.Json dependency.
+```
 
 ## Version 3.6
 - Improvement of HourCounter to synchronize with simulator ClockTime
